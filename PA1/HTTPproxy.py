@@ -34,11 +34,12 @@ class Proxy:
         listen_sock.bind((self.address, self.port))
         listen_sock.listen()
         print("Listening!", flush = True)
-        # accept a connection from a client
-        # will need a refactor when I add multiple clients
-        client_sock, client_addr = listen_sock.accept()
         
         while True:
+            # accept a connection from a client
+            # will need a refactor when I add multiple clients
+            client_sock, client_addr = listen_sock.accept()
+
             # receive the GET request
             request = b''
             print ("Starting reception loop: ", flush = True)
@@ -51,14 +52,16 @@ class Proxy:
             print(request)
             
             # parse the request to extract the URL
-            url, method, headers = self.parse_request(request)
-            print("URL: ", url, "Method: ", method, "Headers: ", headers, flush = True)
+            url, method, version, headers = self.parse_request(request)
+            print("URL: ", url, "Method: ", method, "Version:", version, "Headers: ", headers, flush = True)
             if method != "GET":
                 print("Method not supported", flush = True)
                 client_sock.sendall(b"HTTP/1.0 501 Not Implemented\r\n\r\n")
+                client_sock.close()
                 continue
-            elif not url:
+            elif (not url) or version != "HTTP/1.0":
                 client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+                client_sock.close()
                 continue
             print("URL: " + url + " Method: " + method + " Headers: " + headers, flush = True)
             
@@ -77,13 +80,14 @@ class Proxy:
                 ip = socket.gethostbyname(hostname)
             except Exception:
                 client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+                client_sock.close()
                 continue
             
             print("Hostname: " + hostname + " IP: " + ip + " Port: " + str(port), flush = True)
             # create a socket and connect to the server
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.connect((ip, port))
+            sock.connect((ip, int(port)))
             
             # send the GET request to the server
             request = f"GET /{path} HTTP/1.0\r\nHost: {hostname}\r\n"
@@ -100,13 +104,15 @@ class Proxy:
                 response = sock.recv(4096)
             except Exception:
                 client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+                client_sock.close()
                 continue
             client_sock.sendall(response)
+            client_sock.close()
 
     def parse_request(self, request):
         """
         Parses the HTTP request 
-        and returns the URL, method, and headers as a tuple
+        and returns the URL, method, version, and headers as a tuple
         """
         lines = request.split("\r\n")
         get_line = lines[0]
@@ -114,10 +120,8 @@ class Proxy:
         if len(parts) != 3:
             return None, None, None
         method, url, version = parts
-        if version != "HTTP/1.0":
-            return None, None, None
         headers = "\r\n".join(lines[1:])
-        return url.strip(), method.strip(), headers.strip()
+        return url.strip(), method.strip(), version.strip(), headers.strip()
 
 
 # Start of program execution
