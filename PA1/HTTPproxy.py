@@ -33,67 +33,75 @@ class Proxy:
         listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         listen_sock.bind((self.address, self.port))
         listen_sock.listen()
-        print("Listening!")
+        print("Listening!", flush = True)
         # accept a connection from a client
         # will need a refactor when I add multiple clients
         client_sock, client_addr = listen_sock.accept()
         
-        try:
-            while True:
-                # receive the GET request
-                request = b''
-                print ("Starting while loop: ")
-                while not request.endswith(b"\r\n\r\n"):
-                    chunk = client_sock.recv(4096)
-                    if not chunk:
-                        break
-                    request += chunk
-                request = request.decode()
-                print(request)
-                
-                # parse the request to extract the URL
-                url, method, headers = self.parse_request(request)
-                if method != "GET":
-                    client_sock.send("HTTP/1.0 501 Not Implemented\r\n\r\n".encode())
-                    continue
-                elif not url:
-                    client_sock.send("HTTP/1.0 400 Bad Request\r\n\r\n".encode())
-                    continue
-                print("URL: " + url + " Method: " + method + " Headers: " + headers)
-                
-                # resolve the hostname to an IP address
-                url = url.replace("http://", "", 1)
+        while True:
+            # receive the GET request
+            request = b''
+            print ("Starting reception loop: ", flush = True)
+            while not request.endswith(b"\r\n\r\n"):
+                chunk = client_sock.recv(4096)
+                if not chunk:
+                    break
+                request += chunk
+            request = request.decode()
+            print(request)
+            
+            # parse the request to extract the URL
+            url, method, headers = self.parse_request(request)
+            print("URL: ", url, "Method: ", method, "Headers: ", headers, flush = True)
+            if method != "GET":
+                print("Method not supported", flush = True)
+                client_sock.sendall(b"HTTP/1.0 501 Not Implemented\r\n\r\n")
+                continue
+            elif not url:
+                client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+                continue
+            print("URL: " + url + " Method: " + method + " Headers: " + headers, flush = True)
+            
+            # resolve the hostname to an IP address
+            url = url.replace("http://", "", 1)
+            if "/" in url:
                 hostname, path = url.split("/", 1)
-                port = 80
-                if ":" in hostname:
-                    hostname, port = hostname.split(":")
-                print("Hostname: " + hostname + " Port: " + str(port) + " Path: " + path)
-                try:
-                    ip = socket.gethostbyname(hostname)
-                except:
-                    client_sock.send("HTTP/1.0 400 Bad Request\r\n\r\n".encode())
-                    continue
-                
-                print("Hostname: " + hostname + " IP: " + ip + " Port: " + str(port))
-                # create a socket and connect to the server
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.connect((ip, port))
-                
-                # send the GET request to the server
-                request = f"GET /{path} HTTP/1.0\r\nHost: {hostname}\r\n"
-                if headers.__contains__("Connection:"):
-                    headers = headers.replace("keep-alive", "close")
-                else:
-                    headers = "Connection: close\r\n" + headers
-                request += headers
-                request += "\r\n"
-                sock.send(request.encode())
-                
-                # receive the response and pass it back to the client
+            else:
+                hostname = url
+                path = ""
+            port = 80
+            if ":" in hostname:
+                hostname, port = hostname.split(":")
+            print("Hostname: " + hostname + " Port: " + str(port) + " Path: " + path, flush=True)
+            try:
+                ip = socket.gethostbyname(hostname)
+            except Exception:
+                client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+                continue
+            
+            print("Hostname: " + hostname + " IP: " + ip + " Port: " + str(port), flush = True)
+            # create a socket and connect to the server
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.connect((ip, port))
+            
+            # send the GET request to the server
+            request = f"GET /{path} HTTP/1.0\r\nHost: {hostname}\r\n"
+            if headers.__contains__("Connection:"):
+                headers = headers.replace("keep-alive", "close")
+            else:
+                headers = "Connection: close\r\n" + headers
+            request += headers
+            request += "\r\n"
+            sock.send(request.encode())
+            
+            # receive the response and pass it back to the client
+            try:
                 response = sock.recv(4096)
-                client_sock.send(response)
-        except:
-            client_sock.close()
+            except Exception:
+                client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+                continue
+            client_sock.sendall(response)
 
     def parse_request(self, request):
         """
@@ -128,8 +136,7 @@ if port is None:
 # Set up signal handling (ctrl-c)
 signal.signal(signal.SIGINT, ctrl_c_pressed)
 
-print("About to start proxy")
+print("About to start proxy", flush = True)
 # Start the proxy on the specified address and port!
 proxy = Proxy(address, port)
 proxy.start()
-print("Proxy started")
