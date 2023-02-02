@@ -1,5 +1,4 @@
 # Place your imports here
-from operator import countOf
 import signal
 import socket
 import sys
@@ -113,6 +112,16 @@ class Proxy:
                 client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
                 client_sock.close()
                 continue
+            
+            # Now, make sure we have a Connection: close header
+            if not b"Connection: close" in response:
+                if b"keep-alive" in response:
+                    response.replace(b"keep-alive", b"close")
+                elif response.count(b"\r\n") < 3:
+                    response = b"Connection: close\r\n" + response
+                else:
+                    pieces = response.split(b"\r\n", 1)
+                    response = pieces[0] + b"\r\nConnection: close\r\n" + pieces[1]
             
             # Print response for debugging
             try:
