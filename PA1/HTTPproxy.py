@@ -56,9 +56,21 @@ class Proxy:
             # parse the request to extract the URL
             url, method, version, headers = self.parse_request(request)
             print("URL: ", url, "Method: ", method, "Version:", version, "Headers: ", headers, flush = True)
-            if method != "GET" or version != "HTTP/1.0":
-                print("Method/version not supported", flush = True)
+
+            # Check all the stuffs for errors
+            if not url and not method and not version:
+                print("Bad request", flush = True)
+                client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+                client_sock.close()
+                continue
+            elif method != "GET":
+                print("Method not supported", flush = True)
                 client_sock.sendall(b"HTTP/1.0 501 Not Implemented\r\n\r\n")
+                client_sock.close()
+                continue
+            elif version != "HTTP/1.0":
+                print("Bad version", flush = True)
+                client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
                 client_sock.close()
                 continue
             elif not url or not "http://" in url:
@@ -66,16 +78,18 @@ class Proxy:
                 client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
                 client_sock.close()
                 continue
+                    
             print("URL: " + url + " Method: " + method + " Headers: " + headers, flush = True)
             
             # resolve the hostname to an IP address
-            
             url = url.replace("http://", "", 1)
             if "/" in url:
                 hostname, path = url.split("/", 1)
             else:
-                hostname = url
-                path = ""
+                print("Missing path", flush = True)
+                client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+                client_sock.close()
+                continue
             port = 80
             if ":" in hostname:
                 hostname, port = hostname.split(":")
@@ -137,6 +151,7 @@ class Proxy:
         """
         Parses the HTTP request 
         and returns the URL, method, version, and headers as a tuple
+        Returns a 4-tuple of None if the request is formatted incorrectly
         """
         lines = request.split("\r\n")
         get_line = lines[0]
