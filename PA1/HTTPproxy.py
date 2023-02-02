@@ -1,4 +1,5 @@
 # Place your imports here
+from operator import countOf
 import signal
 import socket
 import sys
@@ -34,6 +35,7 @@ class Proxy:
         listen_sock.bind((self.address, self.port))
         listen_sock.listen()
         print("Listening!", flush = True)
+        i = 1
         
         while True:
             # accept a connection from a client
@@ -42,30 +44,33 @@ class Proxy:
 
             # receive the GET request
             request = b''
-            print ("Starting reception loop: ", flush = True)
+            print("Client: ", i, flush = True)
+            i += 1
             while not request.endswith(b"\r\n\r\n"):
                 chunk = client_sock.recv(4096)
                 if not chunk:
                     break
                 request += chunk
             request = request.decode()
-            print(request)
+            print(request, flush = True)
             
             # parse the request to extract the URL
             url, method, version, headers = self.parse_request(request)
             print("URL: ", url, "Method: ", method, "Version:", version, "Headers: ", headers, flush = True)
-            if method != "GET":
-                print("Method not supported", flush = True)
+            if method != "GET" or version != "HTTP/1.0":
+                print("Method/version not supported", flush = True)
                 client_sock.sendall(b"HTTP/1.0 501 Not Implemented\r\n\r\n")
                 client_sock.close()
                 continue
-            elif (not url) or version != "HTTP/1.0":
+            elif not url or not "http://" in url:
+                print("Bad url", flush = True)
                 client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
                 client_sock.close()
                 continue
             print("URL: " + url + " Method: " + method + " Headers: " + headers, flush = True)
             
             # resolve the hostname to an IP address
+            
             url = url.replace("http://", "", 1)
             if "/" in url:
                 hostname, path = url.split("/", 1)
@@ -83,7 +88,7 @@ class Proxy:
                 client_sock.close()
                 continue
             
-            print("Hostname: " + hostname + " IP: " + ip + " Port: " + str(port), flush = True)
+            print("IP: " + ip, flush = True)
             # create a socket and connect to the server
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -97,18 +102,37 @@ class Proxy:
                 headers = "Connection: close\r\n" + headers
             request += headers
             request += "\r\n"
+            print("Sending request:\n", request, flush = True)
             sock.send(request.encode())
             
             # receive the response and pass it back to the client
+            # first, retrieve the response and pass back to client
             try:
                 response = sock.recv(4096)
             except Exception:
                 client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
                 client_sock.close()
                 continue
+            
+            # Now, make sure we have a Connection: close header
+            if not b"Connection: close" in response:
+                if b"keep-alive" in response:
+                    response.replace(b"keep-alive", b"close")
+                elif response.count(b"\r\n") < 3:
+                    response = b"Connection: close\r\n" + response
+                else:
+                    pieces = response.split(b"\r\n", 1)
+                    response = pieces[0] + b"\r\nConnection: close\r\n" + pieces[1]
+            # Print response for debugging
+            try:
+                print("Received response, sending to client: \n" + response.decode(), flush = True)
+            except Exception:
+                pass # In case response can't be decoded; we don't need to print it
+            
             client_sock.sendall(response)
+            sock.close()
             client_sock.close()
-
+            
     def parse_request(self, request):
         """
         Parses the HTTP request 
@@ -118,8 +142,9 @@ class Proxy:
         get_line = lines[0]
         parts = get_line.split(" ")
         if len(parts) != 3:
-            return None, None, None
+            return None, None, None, None
         method, url, version = parts
+        headers = None
         headers = "\r\n".join(lines[1:])
         return url.strip(), method.strip(), version.strip(), headers.strip()
 
