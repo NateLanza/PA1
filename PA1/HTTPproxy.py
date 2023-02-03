@@ -109,12 +109,15 @@ class Proxy:
             
             # send the GET request to the server
             request = f"GET /{path} HTTP/1.0\r\nHost: {hostname}\r\n"
-            if headers.__contains__("Connection:"):
+            if "Connection:" in headers:
                 headers = headers.replace("keep-alive", "close")
             else:
                 headers = "Connection: close\r\n" + headers
             request += headers
             request += "\r\n"
+            # Verify we have a complete http request!!
+            if not request.endswith("\r\n\r\n"):
+                request += "\r\n"
             print("Sending request:\n", request, flush = True)
             sock.send(request.encode())
             
