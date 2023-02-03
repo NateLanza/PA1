@@ -153,7 +153,12 @@ class Proxy:
             # receive the response and pass it back to the client
             # first, retrieve the response and pass back to client
             try:
-                response = sock.recv(4096)
+                response = b''
+                while not response.endswith(b"\r\n\r\n"):
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    response += chunk
             except Exception:
                 client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
                 client_sock.close()
