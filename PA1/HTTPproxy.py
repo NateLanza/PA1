@@ -101,6 +101,39 @@ class Proxy:
                 client_sock.close()
                 continue
             
+            # Check each line of the headers for formatting
+            badhead = False;
+            for line in headers.split("\r\n"):
+                if line.strip():
+                    if not ":" in line:
+                        client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+                        client_sock.close()
+                        badhead = True
+                        break
+                    elif not line.split(":")[0].strip():
+                        client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+                        client_sock.close()
+                        badhead = True
+                        break
+                    elif not line.split(":")[1].strip():
+                        client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+                        client_sock.close()
+                        badhead = True
+                        break
+                    elif not line[line.find(":") - 1].strip():
+                        client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+                        client_sock.close()
+                        badhead = True
+                        break
+                    elif not line[line.find(":") + 1] == " ":
+                        client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+                        client_sock.close()
+                        badhead = True
+                        break
+            if badhead:
+                print("Bad headers", flush = True)
+                continue
+            
             print("IP: " + ip, flush = True)
             # create a socket and connect to the server
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
