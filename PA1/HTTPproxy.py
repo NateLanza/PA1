@@ -20,6 +20,144 @@ class Proxy:
         """Initializes a proxy which will listen on the given address and port"""
         self.port = port
         self.address = address
+        
+    def handle_client(self, client_sock):
+        """
+        After a client has been accepted and assigned a socket, handles their GET request
+        No return value
+        Params:
+            client_sock: the socket connected to the client
+        """
+        # receive the GET request
+        request = b''
+        while not request.endswith(b"\r\n\r\n"):
+            chunk = client_sock.recv(4096)
+            if not chunk:
+                break
+            request += chunk
+        request = request.decode()
+        print(request, flush = True)
+        
+        # parse the request to extract the URL
+        url, method, version, headers = self.parse_request(request)
+
+        # Check all the stuffs for errors
+        if not url and not method and not version:
+            print("Bad request", flush = True)
+            client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+            client_sock.close()
+            return
+        elif method != "GET":
+            print("Method not supported", flush = True)
+            client_sock.sendall(b"HTTP/1.0 501 Not Implemented\r\n\r\n")
+            client_sock.close()
+            return
+        elif version != "HTTP/1.0":
+            print("Bad version", flush = True)
+            client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+            client_sock.close()
+            return
+        elif not url or not "http://" in url:
+            print("Bad url", flush = True)
+            client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+            client_sock.close()
+            return
+                            
+        # Convert the URL to an IP and port
+        url = url.replace("http://", "", 1)
+        if "/" in url:
+            hostname, path = url.split("/", 1)
+        else:
+            print("Missing path", flush = True)
+            client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+            client_sock.close()
+            return
+        port = 80
+        if ":" in hostname:
+            hostname, port = hostname.split(":")
+        try:
+            ip = socket.gethostbyname(hostname)
+        except Exception:
+            client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+            client_sock.close()
+            return
+        
+        # Check each line of the headers for formatting
+        badhead = False;
+        for line in headers.split("\r\n"):
+            if line.strip():
+                if not ":" in line:
+                    client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+                    client_sock.close()
+                    badhead = True
+                    break
+                elif not line.split(":")[0].strip():
+                    client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+                    client_sock.close()
+                    badhead = True
+                    break
+                elif not line.split(":")[1].strip():
+                    client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+                    client_sock.close()
+                    badhead = True
+                    break
+                elif not line[line.find(":") - 1].strip():
+                    client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+                    client_sock.close()
+                    badhead = True
+                    break
+                elif not line[line.find(":") + 1] == " ":
+                    client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+                    client_sock.close()
+                    badhead = True
+                    break
+        if badhead:
+            print("Bad headers", flush = True)
+            return
+        
+        print("IP: " + ip, flush = True)
+        # create a socket and connect to the server
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.connect((ip, int(port)))
+        
+        # send the GET request to the server
+        request = f"GET /{path} HTTP/1.0\r\nHost: {hostname}\r\n"
+        if "Connection:" in headers:
+            headers = headers.replace("keep-alive", "close")
+        else:
+            headers = "Connection: close\r\n" + headers
+        request += headers
+        request += "\r\n"
+        # Verify we have a complete http request!!
+        if not request.endswith("\r\n\r\n"):
+            request += "\r\n"
+        print("Sending request:\n", request, flush = True)
+        sock.send(request.encode())
+        
+        # receive the response and pass it back to the client
+        # first, retrieve the response and pass back to client
+        try:
+            response = b''
+            while not response.endswith(b"\r\n\r\n"):
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                response += chunk
+        except Exception:
+            client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
+            client_sock.close()
+            return
+        
+        # Print response for debugging
+        try:
+            print("Received response, sending to client: \n" + response.decode(), flush = True)
+        except Exception:
+            pass # In case response can't be decoded; we don't need to print it
+        
+        client_sock.sendall(response)
+        sock.close()
+        client_sock.close()
 
     def start(self):
         """
@@ -38,141 +176,14 @@ class Proxy:
         
         while True:
             # accept a connection from a client
-            # will need a refactor when I add multiple clients
             client_sock, client_addr = listen_sock.accept()
 
-            # receive the GET request
-            request = b''
             print("Client: ", i, flush = True)
             i += 1
-            while not request.endswith(b"\r\n\r\n"):
-                chunk = client_sock.recv(4096)
-                if not chunk:
-                    break
-                request += chunk
-            request = request.decode()
-            print(request, flush = True)
             
-            # parse the request to extract the URL
-            url, method, version, headers = self.parse_request(request)
+            self.handle_client(client_sock)
 
-            # Check all the stuffs for errors
-            if not url and not method and not version:
-                print("Bad request", flush = True)
-                client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
-                client_sock.close()
-                continue
-            elif method != "GET":
-                print("Method not supported", flush = True)
-                client_sock.sendall(b"HTTP/1.0 501 Not Implemented\r\n\r\n")
-                client_sock.close()
-                continue
-            elif version != "HTTP/1.0":
-                print("Bad version", flush = True)
-                client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
-                client_sock.close()
-                continue
-            elif not url or not "http://" in url:
-                print("Bad url", flush = True)
-                client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
-                client_sock.close()
-                continue
-                                
-            # Convert the URL to an IP and port
-            url = url.replace("http://", "", 1)
-            if "/" in url:
-                hostname, path = url.split("/", 1)
-            else:
-                print("Missing path", flush = True)
-                client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
-                client_sock.close()
-                continue
-            port = 80
-            if ":" in hostname:
-                hostname, port = hostname.split(":")
-            try:
-                ip = socket.gethostbyname(hostname)
-            except Exception:
-                client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
-                client_sock.close()
-                continue
             
-            # Check each line of the headers for formatting
-            badhead = False;
-            for line in headers.split("\r\n"):
-                if line.strip():
-                    if not ":" in line:
-                        client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
-                        client_sock.close()
-                        badhead = True
-                        break
-                    elif not line.split(":")[0].strip():
-                        client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
-                        client_sock.close()
-                        badhead = True
-                        break
-                    elif not line.split(":")[1].strip():
-                        client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
-                        client_sock.close()
-                        badhead = True
-                        break
-                    elif not line[line.find(":") - 1].strip():
-                        client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
-                        client_sock.close()
-                        badhead = True
-                        break
-                    elif not line[line.find(":") + 1] == " ":
-                        client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
-                        client_sock.close()
-                        badhead = True
-                        break
-            if badhead:
-                print("Bad headers", flush = True)
-                continue
-            
-            print("IP: " + ip, flush = True)
-            # create a socket and connect to the server
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.connect((ip, int(port)))
-            
-            # send the GET request to the server
-            request = f"GET /{path} HTTP/1.0\r\nHost: {hostname}\r\n"
-            if "Connection:" in headers:
-                headers = headers.replace("keep-alive", "close")
-            else:
-                headers = "Connection: close\r\n" + headers
-            request += headers
-            request += "\r\n"
-            # Verify we have a complete http request!!
-            if not request.endswith("\r\n\r\n"):
-                request += "\r\n"
-            print("Sending request:\n", request, flush = True)
-            sock.send(request.encode())
-            
-            # receive the response and pass it back to the client
-            # first, retrieve the response and pass back to client
-            try:
-                response = b''
-                while not response.endswith(b"\r\n\r\n"):
-                    chunk = sock.recv(4096)
-                    if not chunk:
-                        break
-                    response += chunk
-            except Exception:
-                client_sock.sendall(b"HTTP/1.0 400 Bad Request\r\n\r\n")
-                client_sock.close()
-                continue
-            
-            # Print response for debugging
-            try:
-                print("Received response, sending to client: \n" + response.decode(), flush = True)
-            except Exception:
-                pass # In case response can't be decoded; we don't need to print it
-            
-            client_sock.sendall(response)
-            sock.close()
-            client_sock.close()
             
     def parse_request(self, request):
         """
