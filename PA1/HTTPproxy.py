@@ -2,6 +2,7 @@
 import signal
 import socket
 import sys
+import threading
 from optparse import OptionParser
 
 # Signal handler for pressing ctrl-c
@@ -181,7 +182,8 @@ class Proxy:
             print("Client: ", i, flush = True)
             i += 1
             
-            self.handle_client(client_sock)
+            client_thread = threading.Thread(target=self.handle_client, args=(client_sock,))
+            client_thread.start()
 
             
             
