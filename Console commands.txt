@@ -1,0 +1,13 @@
+SERVER
+D:
+cd D:\SYS\Program Files\Visual Studio\School\PA1
+
+CLIENT
+telnet localhost 2100
+GET http://www.flux.utah.edu/cs4480/simple.html HTTP/1.0
+
+
+telnet localhost 2100
+HOST http://www.flux.utah.edu/cs4480/simple.html HTTP/1.0
+
+
