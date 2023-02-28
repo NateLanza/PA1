@@ -10,6 +10,86 @@ from typing import Tuple
 def ctrl_c_pressed(signal, frame):
     sys.exit(0)
 
+class CommandProcessor:
+    """
+    This class is responsible for handling commands to the proxy, including caching and blocking
+    """
+
+    def __init__(this):
+        # The cache, a dictionary
+        this.cache = dict()
+        # The blocklist, a set
+        this.blocklist = {}
+        
+    def isBlocked(this, hostname: str, port: str = '') -> bool:
+        """
+        Check if the given hostname and port combination is present in the blocklist.
+        Args:
+            hostname (str): The hostname to check.
+            port (str): The port to check. Default is an empty string.
+        Returns:
+            bool: True if the hostname and port combination is present in the blocklist, False otherwise.
+        """
+        for block in this.blocklist:
+            if f"{hostname}:{port}" in block:
+                return True
+            
+        return False
+    
+    def inCache(this, hostname: str, port: str, path: str) -> None:
+        """
+        Check if the given hostname, port, and path combination is present in the cache dictionary.
+        Args:
+        - hostname (str): The hostname to check.
+        - port (str): The port to check.
+        - path (str): The path to check.
+        Returns:
+            Union[object, bool]: The cached object corresponding to the hostname, port, and path combination, or False if it is not present in the cache.
+        """
+        for key in this.cache.keys():
+            if (hostname, port, path) == key:
+                return this.cache[key]
+        return False
+    
+    def cache(this, hostname: str, port: str, path: str, resource: bytes) -> None:
+        """
+        Store the given hostname, port, path, and resource in the cache dictionary.
+        Args:
+        - hostname (str): The hostname to store in the cache.
+        - port (str): The port to store in the cache.
+        - path (str): The path to store in the cache.
+        - resource (bytes): The bytes-like object to store in the cache.
+        """
+        key = (hostname, port, path)
+        this.cache[key] = resource
+    
+    def block(this, string: str) -> None:
+        """
+        Add the given string to the blocklist.
+        Args:
+        - string (str): The string to add to the blocklist.
+        """
+        this.blocklist.add(string)
+    
+    def isCmd(self, path: str) -> bool:
+        """
+        Check whether the given path starts with "/proxy".
+        Args:
+        - path (str): The path to check.
+        Returns:
+            bool: True if the path starts with "/proxy", False otherwise.
+        """
+        return path.startswith("/proxy")
+        
+    def processCmd(this, path: str):
+        """
+        Processes a command from the user
+        
+        Args:
+        - path: The path for the command
+        """
+        
+
 class Proxy: 
     """
     I decided to put the proxy in a class to hopefully make it easier to modify
@@ -18,12 +98,12 @@ class Proxy:
     and port and enters an infinite loop waiting for connections.
     It will accept a single connection, then infinitely forward its HTTP requests.
     """
-    def __init__(self, address: str, port: str):
+    def __init__(this, address: str, port: str):
         """Initializes a proxy which will listen on the given address and port"""
-        self.port = port
-        self.address = address
+        this.port = port
+        this.address = address
     
-    def start(self):
+    def start(this):
         """
         The proxy starts listening on the given address and port
         and enters an infinite loop waiting for connections.
@@ -33,7 +113,7 @@ class Proxy:
         # create a socket and bind it to the specified port
         listen_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        listen_sock.bind((self.address, self.port))
+        listen_sock.bind((this.address, this.port))
         listen_sock.listen()
         print("Listening!", flush = True)
         i = 1
@@ -45,16 +125,16 @@ class Proxy:
             print("Client: ", i, flush = True)
             i += 1
             
-            client_thread = threading.Thread(target=self.handle_client, args=(client_sock,))
+            client_thread = threading.Thread(target=this.handle_client, args=(client_sock,))
             client_thread.start()
         
-    def handle_client(self, client_sock):
+    def handle_client(this, client_sock):
         """
         After a client has been accepted and assigned a socket, handles their GET request
         No return value
         
         Args:
-        - client_sock: the socket connected to the client
+            client_sock: the socket connected to the client
         """
         # receive the GET request
         request = b''
@@ -67,24 +147,24 @@ class Proxy:
         print(request, flush = True)
         
         # parse the request to extract the URL
-        url, method, version, headers = self.parseRequest(request)
+        url, method, version, headers = this.parseRequest(request)
 
         # Check for a formatting error
-        formatErr = self.checkGETFormat(url, method, version)
+        formatErr = this.checkGETFormat(url, method, version)
         if formatErr:
             client_sock.sendall(formatErr)
             client_sock.close()
             return
                             
         # Convert the URL to an IP and port
-        ip, hostname, path, port, error = self.parseURL(url)
+        ip, hostname, path, port, error = this.parseURL(url)
         if error:
             client_sock.sendall(f"HTTP/1.0 400 Bad Request ({error})\r\n\r\n".encode())
             client_sock.close()
             return
         
         # Check each line of the headers for formatting
-        headErr = self.checkHeaderFormat(headers)
+        headErr = this.checkHeaderFormat(headers)
         if headErr:
             client_sock.send(headErr)
             client_sock.close()
@@ -97,7 +177,7 @@ class Proxy:
         sock.connect((ip, int(port)))
         
         # send the GET request to the server
-        request = self.makeRequest(path, hostname, headers)
+        request = this.makeRequest(path, hostname, headers)
         sock.send(request.encode())
         
         # receive the response and pass it back to the client
@@ -126,7 +206,7 @@ class Proxy:
         
     ### Helpers for handle_client ###
     
-    def makeRequest(self, path: str, hostname: str, headers: str) -> str:
+    def makeRequest(this, path: str, hostname: str, headers: str) -> str:
         """
         Constructs a GET request to pass to a server
 
@@ -152,7 +232,7 @@ class Proxy:
 
         return request
     
-    def checkGETFormat(self, url: str, method: str, version: str):
+    def checkGETFormat(this, url: str, method: str, version: str):
         """
         Check if the provided URL, HTTP method, and version are in the expected format for a GET request.
 
@@ -180,7 +260,7 @@ class Proxy:
         else:
             return False
 
-    def parseURL(self, url: str):
+    def parseURL(this, url: str):
         """
         Convert a URL to an IP address and port.
     
@@ -210,7 +290,7 @@ class Proxy:
     
         return (ip, hostname, path, int(port), False)
             
-    def checkHeaderFormat(self, headers: str):
+    def checkHeaderFormat(this, headers: str):
         """
         Check the format of HTTP headers and return False if there is no error, otherwise return the error message.
 
@@ -243,9 +323,8 @@ class Proxy:
                 elif not line[line.find(":") + 1] == " ":
                     return b"HTTP/1.0 400 Bad Request\r\n\r\n"
         return False
-
     
-    def parseRequest(self, request: str):
+    def parseRequest(this, request: str):
         """
         Parses an HTTP request string and returns a tuple of the request URL,
         method, version, and headers.
@@ -266,7 +345,6 @@ class Proxy:
         headers = None
         headers = "\r\n".join(lines[1:])
         return url.strip(), method.strip(), version.strip(), headers.strip()
-
 
 # Start of program execution
 # Parse out the command line server address and port number to listen to
