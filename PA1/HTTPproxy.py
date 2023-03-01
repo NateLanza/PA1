@@ -36,7 +36,7 @@ class CommandProcessor:
             
         return False
     
-    def inCache(this, hostname: str, port: str, path: str) -> None:
+    def inCache(this, hostname: str, port: str, path: str):
         """
         Check if the given hostname, port, and path combination is present in the cache dictionary.
         Args:
@@ -44,7 +44,8 @@ class CommandProcessor:
         - port (str): The port to check.
         - path (str): The path to check.
         Returns:
-            Union[object, bool]: The cached object corresponding to the hostname, port, and path combination, or False if it is not present in the cache.
+            Union[object, bool]: The cached object corresponding to the hostname, port, and path combination, 
+            or False if it is not present in the cache.
         """
         for key in this.cache.keys():
             if (hostname, port, path) == key:
@@ -81,15 +82,48 @@ class CommandProcessor:
         """
         return path.startswith("/proxy")
         
-    def processCmd(this, path: str):
+    def processCmd(this, path: str) -> bytes:
         """
         Processes a command from the user
-        
         Args:
         - path: The path for the command
+        Returns:
+            The byte string response that should be sent to the client.
+            This may be a 200 OK response or an error message-
+            it is OK to feed poorly formatted client paths to this,
+            as long as they pass isCmd()
+        Throws:
+            Exception: if the path argument is not a command
         """
+        if not this.isCmd(path):
+            raise Exception("Not a command")
         
-
+        # Split the path into a list of args
+        args = path.split("/")
+        # Check if the args are valid
+        if not this.checkArgs(args):
+            return b"HTTP/1.0 400 Bad Request ({error})\r\n\r\n"
+        
+        
+    def checkArgs(this, args: list) -> bool:
+        """
+        Check if the given list of arguments is valid.
+        Args:
+        - args (list): The list of arguments to check.
+        Returns:
+            bool: True if the list of arguments is valid, False otherwise.
+        """
+        if (args[1] == "cache"):
+            return len(args) == 3 and \
+            (args[2] == "enable" or args[2] == "disable" or args[2] == "flush")
+        elif (args[1] == "blocklist"):
+            if (len(args) == 3):
+                return args[2] == "enable" or args[2] == "disable" or args[2] == "flush"
+            elif (len(args) == 4):
+                return args[2] == "add" or args[2] == "remove"
+        else:
+            return False
+        
 class Proxy: 
     """
     I decided to put the proxy in a class to hopefully make it easier to modify
