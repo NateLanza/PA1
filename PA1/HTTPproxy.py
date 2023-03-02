@@ -18,8 +18,10 @@ class CommandProcessor:
     def __init__(this):
         # The cache, a dictionary
         this.cache = dict()
+        this.cacheEnabled = False
         # The blocklist, a set
         this.blocklist = {}
+        this.blocklistEnabled = False
         
     def isBlocked(this, hostname: str, port: str = '') -> bool:
         """
@@ -30,9 +32,15 @@ class CommandProcessor:
         Returns:
             bool: True if the hostname and port combination is present in the blocklist, False otherwise.
         """
+        if not this.blocklistEnabled:
+            return False
         for block in this.blocklist:
-            if f"{hostname}:{port}" in block:
-                return True
+            if ":" in block:
+                if f"{hostname}:{port}" in block:
+                    return True
+            else:
+                if hostname in block:
+                    return True
             
         return False
     
@@ -47,9 +55,13 @@ class CommandProcessor:
             Union[object, bool]: The cached object corresponding to the hostname, port, and path combination, 
             or False if it is not present in the cache.
         """
-        for key in this.cache.keys():
-            if (hostname, port, path) == key:
-                return this.cache[key]
+        if not this.cacheEnabled:
+            return False
+        
+        key = (hostname, port, path)
+        if key in this.cache:
+            return this.cache[key]
+        
         return False
     
     def cache(this, hostname: str, port: str, path: str, resource: bytes) -> None:
@@ -80,7 +92,7 @@ class CommandProcessor:
         Returns:
             bool: True if the path starts with "/proxy", False otherwise.
         """
-        return path.startswith("/proxy")
+        return path.startswith("proxy") or path.startswith("/proxy")
         
     def processCmd(this, path: str) -> bytes:
         """
@@ -102,7 +114,37 @@ class CommandProcessor:
         args = path.split("/")
         # Check if the args are valid
         if not this.checkArgs(args):
-            return b"HTTP/1.0 400 Bad Request ({error})\r\n\r\n"
+            return b"HTTP/1.0 400 Bad Request\r\n\r\n"
+        
+        # Handle the command
+        if (args[1] == "cache"):
+            if (args[2] == "enable"):
+                this.cacheEnabled = True
+                return b"HTTP/1.0 200 OK\r\n\r\n"
+            elif (args[2] == "disable"):
+                this.cacheEnabled = False
+                return b"HTTP/1.0 200 OK\r\n\r\n"
+            elif (args[2] == "flush"):
+                this.cache = {}
+                return b"HTTP/1.0 200 OK\r\n\r\n"
+        elif (args[1] == "blocklist"):
+            if (len(args) == 3):
+                if (args[2] == "enable"):
+                    this.blocklistEnabled = True
+                    return b"HTTP/1.0 200 OK\r\n\r\n"
+                elif (args[2] == "disable"):
+                    this.blocklistEnabled = False
+                    return b"HTTP/1.0 200 OK\r\n\r\n"
+                elif (args[2] == "flush"):
+                    this.blocklist = {}
+                    return b"HTTP/1.0 200 OK\r\n\r\n"
+            elif (len(args) == 4):
+                if (args[2] == "add"):
+                    this.blocklist.add(args[3])
+                    return b"HTTP/1.0 200 OK\r\n\r\n"
+                elif (args[2] == "remove"):
+                    this.blocklist.remove(args[3])
+                    return b"HTTP/1.0 200 OK\r\n\r\n"
         
         
     def checkArgs(this, args: list) -> bool:
@@ -136,6 +178,7 @@ class Proxy:
         """Initializes a proxy which will listen on the given address and port"""
         this.port = port
         this.address = address
+        this.cmd = CommandProcessor()
     
     def start(this):
         """
@@ -191,16 +234,40 @@ class Proxy:
             return
                             
         # Convert the URL to an IP and port
-        ip, hostname, path, port, error = this.parseURL(url)
+        hostname, path, port, error = this.parseURL(url)
         if error:
             client_sock.sendall(f"HTTP/1.0 400 Bad Request ({error})\r\n\r\n".encode())
             client_sock.close()
             return
         
+        # Check for commands and blocking
+        if this.cmd.isCmd(path):
+            client_sock.sendall(this.cmd.processCmd(path))
+            client_sock.close()
+            return
+        elif this.cmd.isBlocked(hostname, port):
+            client_sock.sendall(b"HTTP/1.0 403 Forbidden\r\n\r\n")
+            client_sock.close()
+            return
+        
+        # Check the cache
+        cached = this.cmd.inCache(hostname, port, path)
+        if cached:
+            client_sock.sendall(cached)
+            client_sock.close()
+            return
+            
         # Check each line of the headers for formatting
         headErr = this.checkHeaderFormat(headers)
         if headErr:
             client_sock.send(headErr)
+            client_sock.close()
+            return
+        
+        # Get IP
+        ip = this.parseIP(hostname)
+        if not ip:
+            client_sock.sendall(f"HTTP/1.0 400 Bad Request (Host not found)\r\n\r\n".encode())
             client_sock.close()
             return
         
@@ -234,6 +301,10 @@ class Proxy:
         except Exception:
             print("Sending unprintable response\n") # In case response can't be decoded; we don't need to print it
         
+        # Cache response
+        this.cmd.cache(hostname, port, path, response)
+            
+        # Send response to client; close sockets
         client_sock.sendall(response)
         sock.close()
         client_sock.close()
@@ -296,14 +367,11 @@ class Proxy:
 
     def parseURL(this, url: str):
         """
-        Convert a URL to an IP address and port.
-    
+        Convert a URL to a hostname, path, and port
         Args:
         - url: A string representing the URL to convert.
-    
         Returns:
         - A tuple containing the following elements:
-          * The IP address corresponding to the URL.
           * The hostname parsed from the URL.
           * The path parsed from the URL.
           * The port parsed from the URL.
@@ -317,12 +385,18 @@ class Proxy:
         port = 80
         if ":" in hostname:
             hostname, port = hostname.split(":")
-        try:
-            ip = socket.gethostbyname(hostname)
-        except Exception:
-            return (None, None, None, None, "Failed to resolve hostname")
+        
     
-        return (ip, hostname, path, int(port), False)
+        return (hostname, path, int(port), False)
+    
+    def parseIP(this, hostname: str):
+        """
+        Parse a hostname into an IP. Returns false on failure        
+        """
+        try:
+            return socket.gethostbyname(hostname)
+        except Exception:
+            return False
             
     def checkHeaderFormat(this, headers: str):
         """
